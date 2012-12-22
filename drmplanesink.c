@@ -38,9 +38,10 @@ GstDebugCategory *drm_debug;
 
 enum {
 	PROP_0,
-	PROP_CONN,
+	PROP_PLANE,
 	PROP_CRTC,
-	PROP_MODE,
+	PROP_POSX,
+	PROP_POSY,
 	PROP_FILE,
 };
 
@@ -58,16 +59,14 @@ struct gst_drm_sink {
 
 	uint32_t current;
 
-    drmModeCrtcPtr saved_crtc;
-	drmModeModeInfo *mode;
-
-	gchar *mode_name;
 	gchar *device;
 
 	uint32_t width;
 	uint32_t height;
+	uint32_t posx;
+	uint32_t posy;
 
-	uint32_t conn_id;
+	uint32_t plane_id;
 	uint32_t crtc_id;
 
 	int fd;
@@ -126,16 +125,8 @@ setup(struct gst_drm_sink *self, GstCaps *caps)
 	gst_structure_get_int(structure, "width", &width);
 	gst_structure_get_int(structure, "height", &height);
 
-	if (width > self->mode->hdisplay || height > self->mode->vdisplay) {
-		fprintf(stderr, "incoming image is far too big: %dx%d\n", width, height);
-		return false;
-	}
-
-	self->width = width;
-	self->height = height;
-
-	attr[1] = self->mode->hdisplay;
-	attr[3] = self->mode->vdisplay;
+	attr[1] = self->width = width;
+	attr[3] = self->height = height;
 
 	/* configure drm buffers */
 
@@ -167,20 +158,12 @@ setup(struct gst_drm_sink *self, GstCaps *caps)
 			return false;
 		}
 
-		ret = drmModeAddFB(self->fd, self->mode->hdisplay, self->mode->vdisplay, 24, 32, stride, handle, &self->fb[i]);
+		ret = drmModeAddFB(self->fd, self->width, self->height, 24, 32, stride, handle, &self->fb[i]);
 		if (ret) {
 			perror("failed drmModeAddFB()");
 			return false;
 		}
 	}
-
-	/* store current crtc */
-
-    self->saved_crtc = drmModeGetCrtc(self->fd, self->crtc_id);
-    if (self->saved_crtc == NULL) {
-		perror("failed drmModeGetCrtc(current)");
-        return false;
-    }
 
 	self->enabled = true;
 	self->current = 0;
@@ -205,14 +188,17 @@ get_property (GObject * object, guint prop_id,
 	struct gst_drm_sink *self = (struct gst_drm_sink *) object;
 
 	switch (prop_id) {
-		case PROP_CONN:
-			g_value_set_int (value, self->conn_id);
+		case PROP_PLANE:
+			g_value_set_int (value, self->plane_id);
 			break;
 		case PROP_CRTC:
 			g_value_set_int (value, self->crtc_id);
 			break;
-		case PROP_MODE:
-			g_value_set_string (value, self->mode_name);
+		case PROP_POSX:
+			g_value_set_int (value, self->posx);
+			break;
+		case PROP_POSY:
+			g_value_set_int (value, self->posy);
 			break;
 		case PROP_FILE:
 			g_value_set_string (value, self->device);
@@ -229,17 +215,17 @@ set_property (GObject * object, guint prop_id,
 	struct gst_drm_sink *self = (struct gst_drm_sink *) object;
 
 	switch (prop_id) {
-		case PROP_CONN:
-			self->conn_id = g_value_get_int (value);
+		case PROP_PLANE:
+			self->plane_id = g_value_get_int (value);
 			break;
 		case PROP_CRTC:
 			self->crtc_id = g_value_get_int (value);
 			break;
-		case PROP_MODE:
-			self->mode_name = g_strdup (g_value_get_string (value));
-			if (self->mode_name == NULL) {
-				self->mode_name = g_strdup(DEFAULT_PROP_MODE);
-			}
+		case PROP_POSX:
+			self->posx = g_value_get_int (value);
+			break;
+		case PROP_POSY:
+			self->posy = g_value_get_int (value);
 			break;
 		case PROP_FILE:
 			self->device = g_strdup (g_value_get_string (value));
@@ -256,12 +242,10 @@ static gboolean
 start(GstBaseSink *base)
 {
 	struct gst_drm_sink *self = (struct gst_drm_sink *)base;
-	drmModeConnector *connector = NULL;
-
-    drmModeRes *resources;
-	drmModeModeInfo *mode;
-
-	int ret, i;
+	drmModePlane *plane = NULL;
+	drmModePlaneRes *resources;
+	uint32_t i;
+	int ret;
 
 	/* open drm device */
 
@@ -271,45 +255,31 @@ start(GstBaseSink *base)
 		return false;
 	}
 
-	/* get drm mode */
+	/* check drm plane */
 
-	resources = drmModeGetResources(self->fd);
-	if (!resources) {
-		fprintf(stderr, "drmModeGetResources failed\n");
+	resources = drmModeGetPlaneResources(self->fd);
+	if (!resources || resources->count_planes == 0) {
+		fprintf(stderr, "drmModeGetPlaneResources failed\n");
 		return false;
 	}
 
-	for (i = 0; i < resources->count_connectors; i++) {
-		connector = drmModeGetConnector(self->fd, resources->connectors[i]);
-		if (!connector)
+	for (i = 0; i < resources->count_planes; i++) {
+		drmModePlane *p = drmModeGetPlane(self->fd, resources->planes[i]);
+		if (!p)
 			continue;
 
-		if (connector->connector_id == self->conn_id)
+		if (p->plane_id == self->plane_id) {
+			plane = p;
 			break;
+		}
 
-		drmModeFreeConnector(connector);
+		drmModeFreePlane(plane);
 	}
 
-	if (i == resources->count_connectors) {
-		fprintf(stderr, "No proper connector found\n");
-		drmModeFreeResources(resources);
+	if (!plane) {
+		fprintf(stderr, "couldn't find specified plane\n");
 		return false;
 	}
-
-    for (i = 0, mode = connector->modes; i < connector->count_modes; i++, mode++) {
-        if (0 == strcmp(mode->name, self->mode_name))
-            break;
-    }
-
-	if (i == connector->count_modes) {
-        fprintf(stderr, "No selected mode\n");
-		drmModeFreeConnector(connector);
-		return false;
-    }
-
-	drmModeFreeResources(resources);
-
-	self->mode = mode;
 
 	/* create libkms driver */
 
@@ -326,16 +296,9 @@ static gboolean
 stop(GstBaseSink *base)
 {
 	struct gst_drm_sink *self = (struct gst_drm_sink *)base;
-	int ret, i;
+	int i;
 
-    if (self->saved_crtc->mode_valid) {
-        ret = drmModeSetCrtc(self->fd, self->saved_crtc->crtc_id, self->saved_crtc->buffer_id,
-                self->saved_crtc->x, self->saved_crtc->y, &self->conn_id, 1, &self->saved_crtc->mode);
-
-        if (ret) {
-            perror("failed drmModeSetCrtc(restore original)");
-        }
-    }
+	drmModeSetPlane(self->fd, self->plane_id, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 
 	for(i = 0; i < DRM_FRAMES; i++) {
 		drmModeRmFB(self->fd, self->fb[i]);
@@ -372,15 +335,13 @@ render(GstBaseSink *base, GstBuffer *buffer)
 		}
 	}
 
-    ret = drmModeSetCrtc(self->fd, self->crtc_id, self->fb[current],
-		0, 0, &self->conn_id, 1, self->mode);
+	ret = drmModeSetPlane(self->fd, self->plane_id, self->crtc_id, self->fb[current], 0,
+		self->posx, self->posy, self->width, self->height, 0, 0, self->width << 16, self->height << 16);
 
 	if (ret) {
-		perror("failed drmModeSetCrtc(new)");
+		fprintf(stderr, "cannot set plane\n");
 		return GST_FLOW_ERROR;
-    }
-
-    drmModeDirtyFB(self->fd, self->fb[current], NULL, 0);
+	}
 
 	self->current = current ^ 1;
 
@@ -401,17 +362,21 @@ class_init(void *g_class, void *class_data)
 	gobject_class->get_property = get_property;
 	gobject_class->set_property = set_property;
 
-	g_object_class_install_property (gobject_class, PROP_CONN,
-			g_param_spec_int ("conn", "connector_id", "DRM connector id",
+	g_object_class_install_property (gobject_class, PROP_PLANE,
+			g_param_spec_int ("plane", "plane_id", "DRM plane id",
 				0, 1024, 0, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
 	g_object_class_install_property (gobject_class, PROP_CRTC,
 			g_param_spec_int ("crtc", "crtc_id", "DRM crtc id",
 				0, 1024, 0, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
-	g_object_class_install_property (gobject_class, PROP_MODE,
-			g_param_spec_string ("mode", "mode", "DRM connector mode",
-				DEFAULT_PROP_MODE, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+	g_object_class_install_property (gobject_class, PROP_POSX,
+			g_param_spec_int ("posx", "posx", "plane left top corner X position",
+				0, 1024, 0, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+	g_object_class_install_property (gobject_class, PROP_POSY,
+			g_param_spec_int ("posy", "posy", "plane left top corner Y position",
+				0, 1024, 0, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
 	g_object_class_install_property (gobject_class, PROP_FILE,
 			g_param_spec_string ("device", "device", "DRM device",
@@ -431,7 +396,7 @@ base_init(void *g_class)
 	GstPadTemplate *template;
 
 	gst_element_class_set_details_simple(element_class,
-			"Linux DRM sink",
+			"Linux DRM plane sink",
 			"Sink/Video",
 			"Renders video with drm",
 			"matsi");
@@ -471,7 +436,7 @@ plugin_init(GstPlugin *plugin)
 	drm_debug = _gst_debug_category_new("drmsink", 0, "drmsink");
 #endif
 
-	if (!gst_element_register(plugin, "drmsink", GST_RANK_SECONDARY, GST_DRM_SINK_TYPE))
+	if (!gst_element_register(plugin, "drmplanesink", GST_RANK_SECONDARY, GST_DRM_SINK_TYPE))
 		return false;
 
 	return true;
@@ -480,8 +445,8 @@ plugin_init(GstPlugin *plugin)
 GstPluginDesc gst_plugin_desc = {
 	.major_version = GST_VERSION_MAJOR,
 	.minor_version = GST_VERSION_MINOR,
-	.name = "drmsink",
-	.description = (gchar *) "Simple Linux DRM sink",
+	.name = "drmplanesink",
+	.description = (gchar *) "Simple Linux DRM plane sink",
 	.plugin_init = plugin_init,
 	.version = VERSION,
 	.license = "LGPL",

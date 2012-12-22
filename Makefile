@@ -26,7 +26,11 @@ libgstdrmsink.so: drmsink.o log.o
 libgstdrmsink.so: override CFLAGS += $(GST_CFLAGS) $(DRM_CFLAGS) -fPIC -D VERSION='"$(version)"'
 libgstdrmsink.so: override LIBS += $(GST_LIBS) $(DRM_LIBS)
 
-targets += libgstdrmsink.so
+libgstdrmplanesink.so: drmplanesink.o log.o
+libgstdrmplanesink.so: override CFLAGS += $(GST_CFLAGS) $(DRM_CFLAGS) -fPIC -D VERSION='"$(version)"'
+libgstdrmplanesink.so: override LIBS += $(GST_LIBS) $(DRM_LIBS)
+
+targets += libgstdrmsink.so libgstdrmplanesink.so
 
 all: $(targets)
 
@@ -39,6 +43,7 @@ endif
 
 install: $(targets)
 	install -m 755 -D libgstdrmsink.so $(D)/$(prefix)/lib/gstreamer-0.10/libgstdrmsink.so
+	install -m 755 -D libgstdrmplanesink.so $(D)/$(prefix)/lib/gstreamer-0.10/libgstdrmplanesink.so
 
 %.o:: %.c
 	$(QUIET_CC)$(CC) $(CFLAGS) -MMD -o $@ -c $<

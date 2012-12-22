@@ -7,18 +7,17 @@
  * packaging of this file.
  */
 
-#ifndef DRMSINK_H
-#define DRMSINK_H
+#ifndef DRMPLANESINK_H
+#define DRMPLANESINK_H
 
 #include <glib-object.h>
 
-#define GST_DRM_SINK_TYPE (gst_drm_sink_get_type())
+#define GST_DRMPLANE_SINK_TYPE (gst_drmplane_sink_get_type())
 
-GType gst_drm_sink_get_type(void);
+GType gst_drmplane_sink_get_type(void);
 
 #define DRM_FRAMES	2
 
 #define DEFAULT_PROP_FILE	"/dev/dri/card0"
-#define DEFAULT_PROP_MODE	"preferred"
 
-#endif /* DRMSINK_H */
+#endif /* DRMPLANESINK_H */
