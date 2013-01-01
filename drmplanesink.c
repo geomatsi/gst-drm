@@ -25,7 +25,7 @@
 #include <xf86drm.h>
 #include <libkms.h>
 
-#include "drmsink.h"
+#include "drmplanesink.h"
 #include "log.h"
 
 #define ROUND_UP(num, scale) (((num) + ((scale) - 1)) & ~((scale) - 1))
@@ -357,7 +357,7 @@ class_init(void *g_class, void *class_data)
 	gobject_class = (GObjectClass *) g_class;
 	base_sink_class = g_class;
 
-	parent_class = g_type_class_ref(GST_DRM_SINK_TYPE);
+	parent_class = g_type_class_ref(GST_DRMPLANE_SINK_TYPE);
 
 	gobject_class->get_property = get_property;
 	gobject_class->set_property = set_property;
@@ -411,7 +411,7 @@ base_init(void *g_class)
 }
 
 GType
-gst_drm_sink_get_type(void)
+gst_drmplane_sink_get_type(void)
 {
 	static GType type;
 
@@ -423,7 +423,7 @@ gst_drm_sink_get_type(void)
 			.instance_size = sizeof(struct gst_drm_sink),
 		};
 
-		type = g_type_register_static(GST_TYPE_BASE_SINK, "GstDrmSink", &type_info, 0);
+		type = g_type_register_static(GST_TYPE_BASE_SINK, "GstDrmPlaneSink", &type_info, 0);
 	}
 
 	return type;
