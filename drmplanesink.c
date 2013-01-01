@@ -436,7 +436,7 @@ plugin_init(GstPlugin *plugin)
 	drm_debug = _gst_debug_category_new("drmsink", 0, "drmsink");
 #endif
 
-	if (!gst_element_register(plugin, "drmplanesink", GST_RANK_SECONDARY, GST_DRM_SINK_TYPE))
+	if (!gst_element_register(plugin, "drmplanesink", GST_RANK_SECONDARY, GST_DRMPLANE_SINK_TYPE))
 		return false;
 
 	return true;
